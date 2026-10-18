@@ -1,3 +1,5 @@
+import pandas as pd
+
 def pregunta_13():
     """
     Combine las tablas `data/tbl0.tsv` y `data/tbl2.tsv` usando la columna
@@ -15,4 +17,8 @@ def pregunta_13():
         ...
     """
 
-    raise NotImplementedError
+    df_0 = pd.read_csv("data/tbl0.tsv", sep="\t")
+    df_2 = pd.read_csv("data/tbl2.tsv", sep="\t")
+    merged = pd.merge(df_0, df_2, on="c0")
+    result = merged.groupby("c1")["c5b"].sum()
+    return result.sort_index()
