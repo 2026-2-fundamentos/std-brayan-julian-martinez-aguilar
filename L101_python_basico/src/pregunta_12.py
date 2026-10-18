@@ -1,3 +1,9 @@
+import csv
+import gzip
+from collections import defaultdict
+from pathlib import Path
+
+
 def pregunta_12():
     """
     Para cada letra de la primera columna (`letter`), sume todos los valores
@@ -9,4 +15,15 @@ def pregunta_12():
         {"A": 177, "B": 187, "C": 114, ...}
     """
 
-    raise NotImplementedError
+    data_path = Path(__file__).resolve().parents[1] / "data" / "data.csv.gz"
+    metric_sums = defaultdict(int)
+
+    with gzip.open(data_path, mode="rt", encoding="utf-8", newline="") as data_file:
+        rows = csv.reader(data_file, delimiter="\t")
+        for row in rows:
+            letter = row[0]
+            for metric in row[4].split(","):
+                _, raw_value = metric.split(":")
+                metric_sums[letter] += int(raw_value)
+
+    return dict(sorted(metric_sums.items()))
