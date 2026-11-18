@@ -1,5 +1,8 @@
-def pregunta_01():
-    """
+import pandas as pd
+import json
+from pathlib import Path
+
+"""
     Una aseguradora quiere publicar datos de sus afiliados para que un grupo
     de investigación estudie el costo de los seguros, sin que nadie pueda
     reconocer a una persona. El archivo `data/insurance.csv.gz` tiene una fila
@@ -80,4 +83,88 @@ def pregunta_01():
         }
     """
 
-    raise NotImplementedError
+def pregunta_01():
+    # Leer el archivo comprimido
+    data = pd.read_csv('data/insurance.csv.gz', compression='gzip')
+
+    # Crear las columnas de grupo
+    data['age_group'] = pd.cut(data['age'], bins=[18, 30, 40, 50, 65], right=False, labels=['18-29', '30-39', '40-49', '50-64'])
+    data['bmi_group'] = pd.cut(data['bmi'], bins=[0, 18.5, 25, 30, float('inf')], right=False, labels=['bajo peso', 'normal', 'sobrepeso', 'obesidad'])
+    data['children_group'] = pd.cut(data['children'], bins=[0, 1, 3, float('inf')], right=False, labels=['0', '1-2', '3+'])
+
+    # Calcular original_k y original_unique_records
+    original_k = data.groupby(['age', 'sex', 'bmi', 'children', 'region']).size().min()
+    original_unique_records = (data.groupby(['age', 'sex', 'bmi', 'children', 'region']).size() == 1).sum()
+
+    # Definir los esquemas
+    schemes = {
+        "with_children": ['age_group', 'sex', 'bmi_group', 'children_group', 'region'],
+        "without_children": ['age_group', 'sex', 'bmi_group', 'region']
+    }
+
+    report = {
+        "original_k": int(original_k),
+        "original_unique_records": int(original_unique_records),
+        "schemes": {}
+    }
+
+    for scheme_name, quasi_identifiers in schemes.items():
+        # Crear clases de equivalencia
+        equivalence_classes = data.groupby(quasi_identifiers, observed=True).size()
+        k_before_suppression = equivalence_classes.min()
+        suppressed_records = equivalence_classes[equivalence_classes < 5].sum()
+        published_classes = equivalence_classes[equivalence_classes >= 5]
+        published_records = published_classes.sum()
+
+        # Identificar clases sin diversidad en smoker
+        smoker_diversity = data.groupby(quasi_identifiers, observed=True)['smoker'].nunique()
+        published_smoker_diversity = smoker_diversity.reindex(published_classes.index)
+        classes_without_smoker_diversity = published_smoker_diversity[
+            published_smoker_diversity == 1
+        ]
+        records_without_smoker_diversity = published_classes[
+            classes_without_smoker_diversity.index
+        ].sum()
+
+        report["schemes"][scheme_name] = {
+            "quasi_identifiers": quasi_identifiers,
+            "equivalence_classes": int(equivalence_classes.size),
+            "k_before_suppression": int(k_before_suppression),
+            "suppressed_records": int(suppressed_records),
+            "published_records": int(published_records),
+            "published_classes": int(published_classes.size),
+            "classes_without_smoker_diversity": int(classes_without_smoker_diversity.size),
+            "records_without_smoker_diversity": int(records_without_smoker_diversity),
+        }
+
+    selected_scheme = min(
+        report["schemes"],
+        key=lambda scheme_name: report["schemes"][scheme_name]["suppressed_records"],
+    )
+    quasi_identifiers = schemes[selected_scheme]
+
+    equivalence_sizes = data.groupby(
+        quasi_identifiers,
+        observed=True,
+    ).transform("size")
+    published = data[equivalence_sizes >= 5].copy()
+
+    report["selected_scheme"] = selected_scheme
+    report["mean_charges_original"] = float(data["charges"].mean())
+    report["mean_charges_published"] = float(published["charges"].mean())
+    report["smoker_rate_original"] = float((data["smoker"] == "yes").mean())
+    report["smoker_rate_published"] = float((published["smoker"] == "yes").mean())
+
+    published_columns = quasi_identifiers + ["smoker", "charges"]
+    submission_dir = Path("submission")
+    submission_dir.mkdir(parents=True, exist_ok=True)
+    (submission_dir / "privacy_report.json").write_text(
+        json.dumps(report, ensure_ascii=False, indent=2),
+        encoding="utf-8",
+    )
+    published[published_columns].to_csv(
+        submission_dir / "insurance_published.csv",
+        index=False,
+    )
+
+    return report
